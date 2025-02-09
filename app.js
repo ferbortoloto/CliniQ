@@ -5,12 +5,14 @@ const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
 const nodemailer = require('nodemailer');
 
+const User = require("./models/User")
+const Schedule = require('./models/Schedule');
+
 const app = express()
 
 // Configuracao do JSON
 app.use(express.json())
 
-const User = require("./models/User")
 
 // Public route
 app.get("/", (req, res) => {
@@ -34,7 +36,7 @@ app.get("/user/:id", checkToken, async (req, res) => {
     }
 
     // Checando se o usuário está no banco
-    const user = await User.findById(id, "-password") 
+    const user = await User.findById(id, "-password")
 
     if (!user) {
         return res.status(404).json({
@@ -71,6 +73,136 @@ function checkToken(req, res, next) {
         })
     }
 }
+
+
+app.post('/schedules', async (req, res) => {
+    const {
+      cpf,
+      location,
+      doctor,
+      typeConsultation,
+      date,
+      dateConsultation,
+    } = req.body;
+  
+    if (!cpf || !location || !doctor || !typeConsultation || !date || !dateConsultation) {
+      return res.status(422).json({
+        success: false,
+        msg: 'Todos os campos são obrigatórios!',
+      });
+    }
+  
+    try {
+      const newSchedule = new Schedule({
+        cpf,
+        location,
+        doctor,
+        typeConsultation,
+        date,
+        dateConsultation,
+      });
+  
+      await newSchedule.save();
+  
+      res.status(201).json({
+        success: true,
+        msg: 'Agendamento criado com sucesso!',
+        schedule: newSchedule,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({
+        success: false,
+        msg: 'Erro ao agendar o horário.',
+      });
+    }
+});
+
+  
+app.get('/schedules/:cpf', async (req, res) => {
+    const cpf = req.params.cpf;
+
+    try {
+        const schedules = await Schedule.find({ cpf: cpf });
+
+        res.status(200).json({
+            success: true,
+            schedules: schedules,
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            success: false,
+            msg: 'Erro ao obter os agendamentos.',
+        });
+    }
+});
+
+
+app.put('/schedules/:id', async (req, res) => {
+    const id = req.params.id;
+    const { notified, done } = req.body;
+
+    try {
+        const schedule = await Schedule.findById(id);
+
+        if (!schedule) {
+            return res.status(404).json({
+                success: false,
+                msg: 'Agendamento não encontrado.',
+            });
+        }
+
+        if (notified !== undefined) {
+            schedule.notified = notified;
+        }
+        if (done !== undefined) {
+            schedule.done = done;
+        }
+
+        await schedule.save();
+
+        res.status(200).json({
+            success: true,
+            msg: 'Agendamento atualizado com sucesso!',
+            schedule: schedule,
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            success: false,
+            msg: 'Erro ao atualizar o agendamento.',
+        });
+    }
+});
+
+  
+app.delete('/schedules/:id', async (req, res) => {
+    const id = req.params.id;
+
+    try {
+        const schedule = await Schedule.findByIdAndDelete(id);
+
+        if (!schedule) {
+            return res.status(404).json({
+                success: false,
+                msg: 'Agendamento não encontrado.',
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            msg: 'Agendamento excluído com sucesso!',
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            success: false,
+            msg: 'Erro ao excluir o agendamento.',
+        });
+    }
+});
+  
 
 app.post("/auth/register", async (req, res) => {
     const {
