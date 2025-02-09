@@ -4,14 +4,30 @@ const mongoose = require("mongoose")
 const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
 const nodemailer = require('nodemailer');
+const cron = require('node-cron');
+const { format } = require('date-fns');
+const { ptBR } = require('date-fns/locale');
 
 const User = require("./models/User")
 const Schedule = require('./models/Schedule');
+const Doctor = require('./models/Doctor');
+const Specialty = require('./models/Specialty');
 
 const app = express()
 
 // Configuracao do JSON
 app.use(express.json())
+
+
+const transporter = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+    },
+});
 
 
 // Public route
@@ -35,7 +51,6 @@ app.get("/user/:id", checkToken, async (req, res) => {
         })
     }
 
-    // Checando se o usuário está no banco
     const user = await User.findById(id, "-password")
 
     if (!user) {
@@ -48,6 +63,7 @@ app.get("/user/:id", checkToken, async (req, res) => {
 
     res.status(200).json({ user })
 })
+
 
 function checkToken(req, res, next) {
     const authHeader = req.headers["authorization"]
@@ -74,6 +90,130 @@ function checkToken(req, res, next) {
     }
 }
 
+
+app.get('/doctors', async (req, res) => {
+    try {
+      const doctors = await Doctor.find();
+      res.status(200).json({
+        success: true,
+        doctors: doctors,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({
+        success: false,
+        msg: 'Erro ao obter os médicos.',
+      });
+    }
+  });
+
+
+app.get('/doctors/especialidade/:especialidade', async (req, res) => {
+    const especialidade = req.params.especialidade;
+  
+    try {
+      const doctors = await Doctor.find({ especialidade: especialidade });
+      res.status(200).json({
+        success: true,
+        doctors: doctors,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({
+        success: false,
+        msg: 'Erro ao obter os médicos por especialidade.',
+      });
+    }
+  });
+  
+
+app.get('/doctors/specialty/:specialty', async (req, res) => {
+    let specialty = req.params.specialty;
+  
+    try {
+      
+      specialty = specialty.trim().toLowerCase();
+
+      const regex = new RegExp(`^${specialty}$`, 'i');
+  
+      const doctors = await Doctor.find({ specialty: regex });
+  
+      if (doctors.length === 0) {
+        return res.status(404).json({
+          success: false,
+          msg: 'Nenhum médico encontrado para a especialidade fornecida.',
+        });
+      }
+  
+      res.status(200).json({
+        success: true,
+        doctors: doctors,
+      });
+    } catch (err) {
+      console.error('Erro ao obter os médicos por especialidade:', err);
+      res.status(500).json({
+        success: false,
+        msg: 'Erro ao obter os médicos por especialidade.',
+      });
+    }
+  });
+  
+  
+app.get('/specialties', async (req, res) => {
+    try {
+      const specialties = await Specialty.find();
+      res.status(200).json({
+        success: true,
+        specialties: specialties,
+      });
+    } catch (err) {
+      console.error('Erro ao obter as especialidades:', err);
+      res.status(500).json({
+        success: false,
+        msg: 'Erro ao obter as especialidades.',
+      });
+    }
+  });
+
+  
+  app.get('/schedules/:cpf', async (req, res) => {
+    const cpf = req.params.cpf;
+  
+    try {
+      const schedules = await Schedule.find({ cpf: cpf });
+  
+      res.status(200).json({
+        success: true,
+        schedules: schedules,
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({
+        success: false,
+        msg: 'Erro ao obter os agendamentos.',
+      });
+    }
+  });
+
+  
+// Rota para obter todas as consultas agendadas
+app.get('/schedules', async (req, res) => {
+    try {
+      const schedules = await Schedule.find();
+      res.status(200).json({
+        success: true,
+        schedules: schedules,
+      });
+    } catch (err) {
+      console.error('Erro ao obter as consultas agendadas:', err);
+      res.status(500).json({
+        success: false,
+        msg: 'Erro ao obter as consultas agendadas.',
+      });
+    }
+  });
+
+  
 
 app.post('/schedules', async (req, res) => {
     const {
@@ -118,25 +258,59 @@ app.post('/schedules', async (req, res) => {
     }
 });
 
+
+// Rota para enviar notificação manualmente
+app.post('/send-notification/:id', async (req, res) => {
+    const { id } = req.params;
   
-app.get('/schedules/:cpf', async (req, res) => {
-    const cpf = req.params.cpf;
-
     try {
-        const schedules = await Schedule.find({ cpf: cpf });
-
-        res.status(200).json({
-            success: true,
-            schedules: schedules,
-        });
+      const schedule = await Schedule.findById(id);
+      if (!schedule) {
+        return res.status(404).json({ msg: 'Agendamento não encontrado.' });
+      }
+  
+      await sendNotification(schedule);
+      res.status(200).json({ msg: 'Notificação enviada com sucesso!' });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({
-            success: false,
-            msg: 'Erro ao obter os agendamentos.',
-        });
+      console.error(err);
+      res.status(500).json({ msg: 'Erro ao enviar notificação.' });
     }
-});
+  });
+
+  
+// Função para enviar e-mail de notificação
+async function sendNotification(schedule) {
+    try {
+      const user = await User.findOne({ cpf: schedule.cpf });
+  
+      if (!user || !user.email) {
+        throw new Error('E-mail do usuário não encontrado.');
+      }
+  
+      const formattedDate = format(
+        new Date(schedule.dateConsultation),
+        "dd 'de' MMMM 'de' yyyy 'às' HH:mm",
+        { locale: ptBR }
+      );
+  
+      await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: user.email,
+        subject: 'Lembrete de Consulta',
+        text: `Olá, ${user.name}. Você tem uma consulta marcada para ${formattedDate}. Não se esqueça!`,
+      });
+  
+      schedule.notified = true;
+      schedule.notificationSentAt = new Date();
+      await schedule.save();
+  
+      console.log(`Notificação enviada para consulta ID: ${schedule._id}`);
+    } catch (err) {
+      console.error('Erro ao enviar notificação:', err);
+      throw err;
+    }
+  }
+  
 
 
 app.put('/schedules/:id', async (req, res) => {
@@ -291,7 +465,7 @@ app.post("/auth/register", async (req, res) => {
         });
     }
 
-    // Verificar se o usuário já existe (email ou cpf)
+
     const userExists = await User.findOne({
         $or: [{ email: email }, { cpf: cpf }],
     });
@@ -304,11 +478,11 @@ app.post("/auth/register", async (req, res) => {
         });
     }
 
-    // Criando hash da senha
+
     const salt = await bcrypt.genSalt(12);
     const passwordHash = await bcrypt.hash(password, salt);
 
-    // Cria usuário
+
     const user = new User({
         name,
         cpf,
@@ -341,6 +515,7 @@ app.post("/auth/register", async (req, res) => {
     }
 });
 
+
 app.post("/auth/login", async (req, res) => {
     const { cpf, password } = req.body;
 
@@ -359,7 +534,6 @@ app.post("/auth/login", async (req, res) => {
         });
     }
 
-    // Verificar se o usuário existe pelo CPF
     const user = await User.findOne({ cpf: cpf });
 
     if (!user) {
@@ -370,7 +544,6 @@ app.post("/auth/login", async (req, res) => {
         });
     }
 
-    // Verificar a senha
     const checkPassword = await bcrypt.compare(password, user.password);
 
     if (!checkPassword) {
@@ -428,7 +601,6 @@ app.post("/auth/recovery", async (req, res) => {
         });
     }
 
-    // Verificar se o usuário existe
     const user = await User.findOne({ email: email, cpf: cpf });
 
     if (!user) {
@@ -447,15 +619,7 @@ app.post("/auth/recovery", async (req, res) => {
         user.recoveryCodeExpires = Date.now() + 3600000; // Código válido por 1 hora
         await user.save();
 
-        const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS,
-            },
-        });
+        
 
         const mailOptions = {
             from: process.env.EMAIL_USER,
@@ -501,7 +665,6 @@ app.post("/auth/reset-password", async (req, res) => {
         });
     }
 
-    // Verificar se o usuário existe
     const user = await User.findOne({ email: email, cpf: cpf });
 
     if (!user) {
@@ -512,7 +675,6 @@ app.post("/auth/reset-password", async (req, res) => {
         });
     }
 
-    // Verificar o código de recuperação
     if (
         user.recoveryCode !== recoveryCode ||
         user.recoveryCodeExpires < Date.now()
@@ -549,6 +711,56 @@ app.post("/auth/reset-password", async (req, res) => {
     }
 });
 
+
+//Histórico de consultas
+function getStartDate(filter) {
+    const now = new Date(); 
+  
+    switch (filter) {
+      case '1m':
+        return new Date(now.setMonth(now.getMonth() - 1)); 
+      case '3m':
+        return new Date(now.setMonth(now.getMonth() - 3)); 
+      case '6m':
+        return new Date(now.setMonth(now.getMonth() - 6)); 
+      case '1y':
+        return new Date(now.setFullYear(now.getFullYear() - 1)); 
+      default:
+        return null;
+    }
+  }
+  
+  app.get('/history/:cpf', async (req, res) => {
+    const { cpf } = req.params;
+    const { filter } = req.query; 
+  
+    try {
+      const query = {
+        cpf: cpf,
+        done: true, 
+      };
+  
+      const startDate = getStartDate(filter);
+  
+      if (startDate) {
+        query.dateConsultation = { $gte: startDate };
+      }
+  
+      const history = await Schedule.find(query).sort({ dateConsultation: -1 });
+  
+      res.status(200).json({
+        success: true,
+        history: history,
+      });
+    } catch (err) {
+      console.error('Erro ao obter o histórico de consultas:', err);
+      res.status(500).json({
+        success: false,
+        msg: 'Erro ao obter o histórico de consultas.',
+      });
+    }
+  });
+  
 
 //Credenciais
 const db = process.env.DB
