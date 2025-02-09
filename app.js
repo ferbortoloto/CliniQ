@@ -5,6 +5,7 @@ const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
 const nodemailer = require('nodemailer');
 const cron = require('node-cron');
+const cors = require('cors');
 const { format } = require('date-fns');
 const { ptBR } = require('date-fns/locale');
 
@@ -14,6 +15,8 @@ const Doctor = require('./models/Doctor');
 const Specialty = require('./models/Specialty');
 
 const app = express()
+
+app.use(cors());
 
 // Configuracao do JSON
 app.use(express.json())
@@ -103,25 +106,6 @@ app.get('/doctors', async (req, res) => {
       res.status(500).json({
         success: false,
         msg: 'Erro ao obter os médicos.',
-      });
-    }
-  });
-
-
-app.get('/doctors/especialidade/:especialidade', async (req, res) => {
-    const especialidade = req.params.especialidade;
-  
-    try {
-      const doctors = await Doctor.find({ especialidade: especialidade });
-      res.status(200).json({
-        success: true,
-        doctors: doctors,
-      });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({
-        success: false,
-        msg: 'Erro ao obter os médicos por especialidade.',
       });
     }
   });

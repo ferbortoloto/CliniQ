@@ -27,11 +27,19 @@ const ScheduleSchema = new mongoose.Schema({
   },
   notified: { 
     type: Boolean,
-    default: false,
+    default: false, 
   },
   done: { 
     type: Boolean,
-    default: false,
+    default: false, 
+  },
+  notificationMinutes: { 
+    type: Number, 
+    default: 60, 
+  },
+  notificationSentAt: {
+    type: Date, 
+    default: null, 
   },
 });
 
